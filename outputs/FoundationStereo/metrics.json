@@ -1,0 +1,29 @@
+{
+  "model": "FoundationStereo",
+  "image_size_hw": [
+    480,
+    848
+  ],
+  "valid_iters": 32,
+  "inference_time_sec_mean": 0.9802133321762085,
+  "inference_time_sec_std": 0.0006676643516348573,
+  "inference_time_sec_all": [
+    0.9799244403839111,
+    0.9813296794891357,
+    0.9812166690826416,
+    0.9802606105804443,
+    0.980618953704834,
+    0.9798581600189209,
+    0.9801511764526367,
+    0.9792251586914062,
+    0.980255126953125,
+    0.9792933464050293
+  ],
+  "gpu_peak_mem_mb": 5021.68701171875,
+  "cpu_percent_mean": 100.56102564102565,
+  "cpu_percent_max": 119.6,
+  "ram_mb": 4160.43359375,
+  "num_points_raw": 384006,
+  "num_points_denoised": 311602,
+  "outlier_removed_ratio": 0.18854913725306377
+}

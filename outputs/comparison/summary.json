@@ -1,0 +1,73 @@
+{
+  "fs": {
+    "model": "FoundationStereo",
+    "image_size_hw": [
+      480,
+      848
+    ],
+    "valid_iters": 32,
+    "inference_time_sec_mean": 0.9802133321762085,
+    "inference_time_sec_std": 0.0006676643516348573,
+    "inference_time_sec_all": [
+      0.9799244403839111,
+      0.9813296794891357,
+      0.9812166690826416,
+      0.9802606105804443,
+      0.980618953704834,
+      0.9798581600189209,
+      0.9801511764526367,
+      0.9792251586914062,
+      0.980255126953125,
+      0.9792933464050293
+    ],
+    "gpu_peak_mem_mb": 5021.68701171875,
+    "cpu_percent_mean": 100.56102564102565,
+    "cpu_percent_max": 119.6,
+    "ram_mb": 4160.43359375,
+    "num_points_raw": 384006,
+    "num_points_denoised": 311602,
+    "outlier_removed_ratio": 0.18854913725306377,
+    "process_wall_time_sec": 23.267519235610962
+  },
+  "ffs": {
+    "model": "Fast-FoundationStereo",
+    "image_size_hw": [
+      480,
+      848
+    ],
+    "valid_iters": 8,
+    "inference_time_sec_mean": 0.08762741088867188,
+    "inference_time_sec_std": 0.010228473134369571,
+    "inference_time_sec_all": [
+      0.0797886848449707,
+      0.08046722412109375,
+      0.08068251609802246,
+      0.08099818229675293,
+      0.08033204078674316,
+      0.08059954643249512,
+      0.08396387100219727,
+      0.10227727890014648,
+      0.1044623851776123,
+      0.10270237922668457
+    ],
+    "gpu_peak_mem_mb": 869.8759765625,
+    "cpu_percent_mean": 97.37777777777777,
+    "cpu_percent_max": 119.6,
+    "ram_mb": 2483.79296875,
+    "num_points_raw": 384194,
+    "num_points_denoised": 286385,
+    "outlier_removed_ratio": 0.25458232039021955,
+    "process_wall_time_sec": 9.068265199661255
+  },
+  "depth_comparison": {
+    "valid_pixel_ratio": 0.9432930424528302,
+    "depth_MAE_m": 0.024840595200657845,
+    "depth_RMSE_m": 0.13340607285499573,
+    "bad_pixel_ratio_2cm": 0.14027575932784314,
+    "bad_pixel_ratio_5cm": 0.07135415852775565
+  },
+  "pointcloud_comparison": {
+    "icp_fitness": 0.9667731387854618,
+    "icp_inlier_rmse_m": 0.008186068234953842
+  }
+}
