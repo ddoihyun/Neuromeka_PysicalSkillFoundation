@@ -26,6 +26,13 @@ from Utils import (
 )
 import cv2
 
+try:
+  import pynvml
+  pynvml.nvmlInit()
+  _NVML_OK = True
+except Exception:
+  _NVML_OK = False
+
 
 class CpuSampler:
   """forward pass가 실행되는 동안 백그라운드 스레드에서 프로세스 CPU 사용률(%)을 주기적으로 샘플링."""
@@ -49,6 +56,35 @@ class CpuSampler:
     self._stop.set()
     self._thread.join()
     return self.samples
+
+
+class GpuSampler:
+  """forward pass 동안 nvidia-smi와 동일한 개념의 GPU 코어 사용률(%)과 VRAM 사용량을 주기적으로 샘플링."""
+  def __init__(self, device_index=0, interval=0.05):
+    self.interval = interval
+    self.samples_util = []
+    self.samples_mem_used_mb = []
+    self._stop = threading.Event()
+    self.handle = pynvml.nvmlDeviceGetHandleByIndex(device_index) if _NVML_OK else None
+
+  def _run(self):
+    while not self._stop.is_set():
+      if self.handle is not None:
+        util = pynvml.nvmlDeviceGetUtilizationRates(self.handle)
+        mem = pynvml.nvmlDeviceGetMemoryInfo(self.handle)
+        self.samples_util.append(util.gpu)
+        self.samples_mem_used_mb.append(mem.used / 1024**2)
+      time.sleep(self.interval)
+
+  def start(self):
+    self._thread = threading.Thread(target=self._run, daemon=True)
+    self._thread.start()
+    return self
+
+  def stop(self):
+    self._stop.set()
+    self._thread.join()
+    return self.samples_util, self.samples_mem_used_mb
 
 
 if __name__=="__main__":
@@ -127,9 +163,10 @@ if __name__=="__main__":
         _ = model.run_hierachical(img0_t, img1_t, iters=args.valid_iters, test_mode=True, small_ratio=0.5)
     torch.cuda.synchronize()
 
-  # ---------------- [PATCH] timed forward passes (+ CPU 사용률 샘플링) ----------------
+  # ---------------- [PATCH] timed forward passes (+ CPU/GPU 사용률 샘플링) ----------------
   torch.cuda.reset_peak_memory_stats()
   cpu_sampler = CpuSampler(interval=0.05).start()
+  gpu_sampler = GpuSampler(device_index=0, interval=0.05).start()
   times = []
   for _ in range(args.repeat):
     t0 = time.time()
@@ -141,6 +178,7 @@ if __name__=="__main__":
     torch.cuda.synchronize()
     times.append(time.time() - t0)
   cpu_samples = cpu_sampler.stop()
+  gpu_util_samples, gpu_mem_samples = gpu_sampler.stop()
   logging.info("forward done")
 
   infer_time_mean = float(np.mean(times))
@@ -149,6 +187,17 @@ if __name__=="__main__":
   cpu_percent_mean = float(np.mean(cpu_samples)) if cpu_samples else None
   cpu_percent_max = float(np.max(cpu_samples)) if cpu_samples else None
   ram_mb = psutil.Process(os.getpid()).memory_info().rss / 1024**2
+
+  gpu_util_mean = float(np.mean(gpu_util_samples)) if gpu_util_samples else None
+  gpu_util_max = float(np.max(gpu_util_samples)) if gpu_util_samples else None
+
+  # ---------------- [PATCH] 시스템 전체 자원 대비 사용률(%) ----------------
+  cpu_count = psutil.cpu_count(logical=True)
+  ram_total_mb = psutil.virtual_memory().total / 1024**2
+  if _NVML_OK:
+    gpu_total_mem_mb = pynvml.nvmlDeviceGetMemoryInfo(pynvml.nvmlDeviceGetHandleByIndex(0)).total / 1024**2
+  else:
+    gpu_total_mem_mb = torch.cuda.get_device_properties(0).total_memory / 1024**2
 
   disp = padder.unpad(disp.float())
   disp = disp.data.cpu().numpy().reshape(H,W).clip(0, None)
@@ -182,9 +231,18 @@ if __name__=="__main__":
     'inference_time_sec_std': infer_time_std,
     'inference_time_sec_all': times,
     'gpu_peak_mem_mb': float(gpu_peak_mem_mb),
-    'cpu_percent_mean': cpu_percent_mean,   # 100% = 코어 1개 풀사용. 400%면 4코어 풀사용 등 (htop 관례와 동일)
+    'gpu_mem_total_mb': float(gpu_total_mem_mb),
+    'gpu_mem_percent_of_total': float(gpu_peak_mem_mb / gpu_total_mem_mb * 100),
+    'gpu_util_percent_mean': gpu_util_mean,   # nvidia-smi의 Volatile GPU-Util과 동일 개념 (전체 GPU 대비 %)
+    'gpu_util_percent_max': gpu_util_max,
+    'cpu_percent_mean': cpu_percent_mean,     # 100% = 코어 1개 풀사용 (htop 관례)
     'cpu_percent_max': cpu_percent_max,
+    'cpu_count': int(cpu_count),
+    'cpu_percent_mean_of_total': float(cpu_percent_mean / (cpu_count * 100) * 100) if cpu_percent_mean is not None else None,
+    'cpu_percent_max_of_total': float(cpu_percent_max / (cpu_count * 100) * 100) if cpu_percent_max is not None else None,
     'ram_mb': float(ram_mb),
+    'ram_total_mb': float(ram_total_mb),
+    'ram_percent_of_total': float(ram_mb / ram_total_mb * 100),
   }
 
   if args.get_pc:

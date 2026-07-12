@@ -236,7 +236,7 @@ def make_plots(metrics_fs: dict, metrics_ffs: dict, depth_cmp: dict, pc_cmp: dic
     os.makedirs(COMPARISON_OUT_DIR, exist_ok=True)
     labels = ["FoundationStereo", "Fast-FoundationStereo"]
 
-    fig, axes = plt.subplots(2, 3, figsize=(16, 8))
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8))
     axes = axes.flatten()
 
     # 1) inference time
@@ -246,40 +246,31 @@ def make_plots(metrics_fs: dict, metrics_ffs: dict, depth_cmp: dict, pc_cmp: dic
     axes[0].set_title("Inference Time (s)")
     axes[0].set_ylabel("seconds")
 
-    # 2) GPU memory: 전체 VRAM 대비 %
-    gpu_mem_pct = [metrics_fs.get("gpu_mem_percent_of_total", 0), metrics_ffs.get("gpu_mem_percent_of_total", 0)]
-    axes[1].bar(labels, gpu_mem_pct, color=["#4C72B0", "#DD8452"])
-    axes[1].set_title("GPU Memory Usage (% of total VRAM)")
-    axes[1].set_ylabel("%")
-    axes[1].set_ylim(0, 100)
+    # 2) GPU peak memory
+    mems = [metrics_fs.get("gpu_peak_mem_mb", 0), metrics_ffs.get("gpu_peak_mem_mb", 0)]
+    axes[1].bar(labels, mems, color=["#4C72B0", "#DD8452"])
+    axes[1].set_title("GPU Peak Memory (MB)")
+    axes[1].set_ylabel("MB")
 
-    # 3) GPU core utilization (nvidia-smi Volatile GPU-Util과 동일 개념)
-    gpu_util = [metrics_fs.get("gpu_util_percent_mean", 0) or 0, metrics_ffs.get("gpu_util_percent_mean", 0) or 0]
-    axes[2].bar(labels, gpu_util, color=["#4C72B0", "#DD8452"])
-    axes[2].set_title("GPU Core Utilization (mean, %)")
-    axes[2].set_ylabel("%")
-    axes[2].set_ylim(0, 100)
-
-    # 4) CPU: 전체 코어 대비 %
-    cpu_pct = [metrics_fs.get("cpu_percent_mean_of_total", 0) or 0, metrics_ffs.get("cpu_percent_mean_of_total", 0) or 0]
-    axes[3].bar(labels, cpu_pct, color=["#4C72B0", "#DD8452"])
-    axes[3].set_title("CPU Usage (% of all cores)")
-    axes[3].set_ylabel("%")
-    axes[3].set_ylim(0, 100)
-
-    # 5) RAM: 전체 시스템 RAM 대비 %
-    ram_pct = [metrics_fs.get("ram_percent_of_total", 0), metrics_ffs.get("ram_percent_of_total", 0)]
-    axes[4].bar(labels, ram_pct, color=["#4C72B0", "#DD8452"])
-    axes[4].set_title("RAM Usage (% of total system RAM)")
-    axes[4].set_ylabel("%")
-    axes[4].set_ylim(0, 100)
-
-    # 6) point count
+    # 3) point count
     pts = [metrics_fs.get("num_points_denoised", metrics_fs.get("num_points_raw", 0)),
            metrics_ffs.get("num_points_denoised", metrics_ffs.get("num_points_raw", 0))]
-    axes[5].bar(labels, pts, color=["#4C72B0", "#DD8452"])
-    axes[5].set_title("Point Cloud Count (denoised)")
-    axes[5].set_ylabel("# points")
+    axes[2].bar(labels, pts, color=["#4C72B0", "#DD8452"])
+    axes[2].set_title("Point Cloud Count (denoised)")
+    axes[2].set_ylabel("# points")
+
+    # 4) CPU usage (forward pass 동안 프로세스 CPU 사용률, 100% = 코어 1개)
+    cpu_means = [metrics_fs.get("cpu_percent_mean", 0) or 0, metrics_ffs.get("cpu_percent_mean", 0) or 0]
+    cpu_maxes = [metrics_fs.get("cpu_percent_max", 0) or 0, metrics_ffs.get("cpu_percent_max", 0) or 0]
+    x = np.arange(len(labels))
+    width = 0.35
+    axes[3].bar(x - width/2, cpu_means, width, label="mean", color=["#4C72B0", "#4C72B0"])
+    axes[3].bar(x + width/2, cpu_maxes, width, label="max", color=["#DD8452", "#DD8452"])
+    axes[3].set_xticks(x)
+    axes[3].set_xticklabels(labels)
+    axes[3].set_title("CPU Usage during forward (%)")
+    axes[3].set_ylabel("% (100% = 1 core)")
+    axes[3].legend()
 
     for ax in axes:
         ax.tick_params(axis='x', rotation=15)
