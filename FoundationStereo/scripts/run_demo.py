@@ -5,13 +5,7 @@
 # and any modifications thereto.  Any use, reproduction, disclosure or
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
-#
-# ---------------------------------------------------------------------------
-# [PATCHED] added:
-#   --headless : skip cv2 / open3d blocking visualization windows
-#   timing + GPU peak-memory measurement
-#   metrics.json output for quantitative comparison (used by main.py)
-# ---------------------------------------------------------------------------
+
 
 import os,sys
 import argparse
@@ -19,10 +13,6 @@ import imageio
 import torch
 import logging
 import cv2
-import time
-import json
-import threading
-import psutil
 import numpy as np
 import open3d as o3d
 code_dir = os.path.dirname(os.path.realpath(__file__))
@@ -31,30 +21,6 @@ from omegaconf import OmegaConf
 from core.utils.utils import InputPadder
 from Utils import set_logging_format, set_seed, vis_disparity, depth2xyzmap, toOpen3dCloud
 from core.foundation_stereo import FoundationStereo
-
-
-class CpuSampler:
-  """forward pass가 실행되는 동안 백그라운드 스레드에서 프로세스 CPU 사용률(%)을 주기적으로 샘플링."""
-  def __init__(self, interval=0.05):
-    self.proc = psutil.Process(os.getpid())
-    self.interval = interval
-    self.samples = []
-    self._stop = threading.Event()
-    self.proc.cpu_percent()  # 첫 호출은 항상 0.0을 반환하므로 미리 소모
-
-  def _run(self):
-    while not self._stop.is_set():
-      self.samples.append(self.proc.cpu_percent(interval=self.interval))
-
-  def start(self):
-    self._thread = threading.Thread(target=self._run, daemon=True)
-    self._thread.start()
-    return self
-
-  def stop(self):
-    self._stop.set()
-    self._thread.join()
-    return self.samples
 
 
 if __name__=="__main__":
@@ -74,9 +40,6 @@ if __name__=="__main__":
   parser.add_argument('--denoise_cloud', type=int, default=1, help='whether to denoise the point cloud')
   parser.add_argument('--denoise_nb_points', type=int, default=30, help='number of points to consider for radius outlier removal')
   parser.add_argument('--denoise_radius', type=float, default=0.03, help='radius to use for outlier removal')
-  parser.add_argument('--headless', type=int, default=0, help='1이면 cv2/open3d 시각화 창을 띄우지 않고 바로 종료 (벤치마크 자동화용)')
-  parser.add_argument('--warmup', type=int, default=1, help='측정 전 워밍업 forward 횟수 (CUDA 커널 컴파일 시간 제외용)')
-  parser.add_argument('--repeat', type=int, default=1, help='측정을 위해 forward를 반복할 횟수 (평균/표준편차 계산용)')
   args = parser.parse_args()
 
   set_logging_format()
@@ -117,42 +80,16 @@ if __name__=="__main__":
 
   logging.info(f"img0: {img0.shape}")
 
-  img0_t = torch.as_tensor(img0).cuda().float()[None].permute(0,3,1,2)
-  img1_t = torch.as_tensor(img1).cuda().float()[None].permute(0,3,1,2)
-  padder = InputPadder(img0_t.shape, divis_by=32, force_square=False)
-  img0_t, img1_t = padder.pad(img0_t, img1_t)
+  img0 = torch.as_tensor(img0).cuda().float()[None].permute(0,3,1,2)
+  img1 = torch.as_tensor(img1).cuda().float()[None].permute(0,3,1,2)
+  padder = InputPadder(img0.shape, divis_by=32, force_square=False)
+  img0, img1 = padder.pad(img0, img1)
 
-  # ---------------- [PATCH] warmup ----------------
-  for _ in range(args.warmup):
-    with torch.cuda.amp.autocast(True):
-      if not args.hiera:
-        _ = model.forward(img0_t, img1_t, iters=args.valid_iters, test_mode=True)
-      else:
-        _ = model.run_hierachical(img0_t, img1_t, iters=args.valid_iters, test_mode=True, small_ratio=0.5)
-    torch.cuda.synchronize()
-
-  # ---------------- [PATCH] timed forward passes (+ CPU 사용률 샘플링) ----------------
-  torch.cuda.reset_peak_memory_stats()
-  cpu_sampler = CpuSampler(interval=0.05).start()
-  times = []
-  for _ in range(args.repeat):
-    t0 = time.time()
-    with torch.cuda.amp.autocast(True):
-      if not args.hiera:
-        disp = model.forward(img0_t, img1_t, iters=args.valid_iters, test_mode=True)
-      else:
-        disp = model.run_hierachical(img0_t, img1_t, iters=args.valid_iters, test_mode=True, small_ratio=0.5)
-    torch.cuda.synchronize()
-    times.append(time.time() - t0)
-  cpu_samples = cpu_sampler.stop()
-
-  infer_time_mean = float(np.mean(times))
-  infer_time_std = float(np.std(times))
-  gpu_peak_mem_mb = torch.cuda.max_memory_allocated() / 1024**2
-  cpu_percent_mean = float(np.mean(cpu_samples)) if cpu_samples else None
-  cpu_percent_max = float(np.max(cpu_samples)) if cpu_samples else None
-  ram_mb = psutil.Process(os.getpid()).memory_info().rss / 1024**2
-
+  with torch.cuda.amp.autocast(True):
+    if not args.hiera:
+      disp = model.forward(img0, img1, iters=args.valid_iters, test_mode=True)
+    else:
+      disp = model.run_hierachical(img0, img1, iters=args.valid_iters, test_mode=True, small_ratio=0.5)
   disp = padder.unpad(disp.float())
   disp = disp.data.cpu().numpy().reshape(H,W)
   vis = vis_disparity(disp)
@@ -160,32 +97,23 @@ if __name__=="__main__":
   imageio.imwrite(f'{args.out_dir}/disp_vis.png', vis)
   logging.info(f"Output saved to {args.out_dir}")
 
-  # ---------------- [PATCH] headless-guarded display ----------------
-  if not args.headless:
-    s = 1280 / vis.shape[1]
-    resized_vis = cv2.resize(vis, (int(vis.shape[1] * s), int(vis.shape[0] * s)))
-    cv2.imshow("FoundationStereo Disparity", resized_vis[:, :, ::-1])
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+  # Show disparity visualization
+  s = 1280 / vis.shape[1]
+  resized_vis = cv2.resize(
+      vis,
+      (int(vis.shape[1] * s), int(vis.shape[0] * s))
+  )
+
+  # imageio는 RGB, OpenCV는 BGR이므로 변환
+  cv2.imshow("FoundationStereo Disparity", resized_vis[:, :, ::-1])
+  cv2.waitKey(0)
+  cv2.destroyAllWindows()
 
   if args.remove_invisible:
     yy,xx = np.meshgrid(np.arange(disp.shape[0]), np.arange(disp.shape[1]), indexing='ij')
     us_right = xx-disp
     invalid = us_right<0
     disp[invalid] = np.inf
-
-  metrics = {
-    'model': 'FoundationStereo',
-    'image_size_hw': [int(H), int(W)],
-    'valid_iters': int(args.valid_iters),
-    'inference_time_sec_mean': infer_time_mean,
-    'inference_time_sec_std': infer_time_std,
-    'inference_time_sec_all': times,
-    'gpu_peak_mem_mb': float(gpu_peak_mem_mb),
-    'cpu_percent_mean': cpu_percent_mean,   # 100% = 코어 1개 풀사용. 400%면 4코어 풀사용 등 (htop 관례와 동일)
-    'cpu_percent_max': cpu_percent_max,
-    'ram_mb': float(ram_mb),
-  }
 
   if args.get_pc:
     with open(args.intrinsic_file, 'r') as f:
@@ -202,29 +130,20 @@ if __name__=="__main__":
     pcd = pcd.select_by_index(keep_ids)
     o3d.io.write_point_cloud(f'{args.out_dir}/cloud.ply', pcd)
     logging.info(f"PCL saved to {args.out_dir}")
-    metrics['num_points_raw'] = int(len(np.asarray(pcd.points)))
 
     if args.denoise_cloud:
       logging.info("[Optional step] denoise point cloud...")
       cl, ind = pcd.remove_radius_outlier(nb_points=args.denoise_nb_points, radius=args.denoise_radius)
       inlier_cloud = pcd.select_by_index(ind)
       o3d.io.write_point_cloud(f'{args.out_dir}/cloud_denoise.ply', inlier_cloud)
-      metrics['num_points_denoised'] = int(len(np.asarray(inlier_cloud.points)))
-      metrics['outlier_removed_ratio'] = 1.0 - metrics['num_points_denoised'] / max(metrics['num_points_raw'], 1)
       pcd = inlier_cloud
 
-    # ---------------- [PATCH] headless-guarded o3d viewer ----------------
-    if not args.headless:
-      logging.info("Visualizing point cloud. Press ESC to exit.")
-      vis3d = o3d.visualization.Visualizer()
-      vis3d.create_window()
-      vis3d.add_geometry(pcd)
-      vis3d.get_render_option().point_size = 1.0
-      vis3d.get_render_option().background_color = np.array([0.5, 0.5, 0.5])
-      vis3d.run()
-      vis3d.destroy_window()
+    logging.info("Visualizing point cloud. Press ESC to exit.")
+    vis = o3d.visualization.Visualizer()
+    vis.create_window()
+    vis.add_geometry(pcd)
+    vis.get_render_option().point_size = 1.0
+    vis.get_render_option().background_color = np.array([0.5, 0.5, 0.5])
+    vis.run()
+    vis.destroy_window()
 
-  # ---------------- [PATCH] save metrics.json ----------------
-  with open(f'{args.out_dir}/metrics.json', 'w') as f:
-    json.dump(metrics, f, indent=2)
-  logging.info(f"Metrics saved to {args.out_dir}/metrics.json")
