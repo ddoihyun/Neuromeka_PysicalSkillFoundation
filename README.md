@@ -14,9 +14,9 @@ Stereo/
 │   ├── left.png / right.png         # 스테레오 입력 이미지
 │   └── K.txt                        # 카메라 intrinsic + baseline
 ├── FoundationStereo/
-│   └── scripts/run_demo.py          # ★ patch된 버전으로 교체 필요
+│   └── scripts/run_demo.py          
 ├── Fast-FoundationStereo/
-│   └── scripts/run_demo.py          # ★ patch된 버전으로 교체 필요
+│   └── scripts/run_demo.py          
 └── outputs/
     ├── FoundationStereo/            # fs 실행 결과 (main.py가 자동 생성/삭제)
     ├── Fast-FoundationStereo/       # ffs 실행 결과 (main.py가 자동 생성/삭제)
